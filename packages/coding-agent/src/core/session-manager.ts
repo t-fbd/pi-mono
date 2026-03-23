@@ -23,6 +23,7 @@ import {
 	createCompactionSummaryMessage,
 	createCustomMessage,
 } from "./messages.js";
+import { expandPath } from "./tools/path-utils.js";
 
 export const CURRENT_SESSION_VERSION = 4;
 
@@ -813,7 +814,9 @@ export class SessionManager {
 	}
 
 	addScopePath(scopePath: string): void {
-		this.setScopePaths([...this.scopePaths, scopePath]);
+		const expanded = expandPath(scopePath);
+		const resolved = resolve(this.cwd, expanded);
+		this.setScopePaths([...this.scopePaths, resolved]);
 	}
 
 	removeScopePath(scopePath: string): void {
