@@ -125,6 +125,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 			settingsManager: {
 				getQuietStartup: () => options.quietStartup,
 			},
+			getBuiltInCommandConflictDiagnostics: () => [],
 			session: {
 				promptTemplates: [],
 				extensionRunner: undefined,
@@ -136,7 +137,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 						diagnostics: options.skillDiagnostics ?? [],
 					}),
 					getPrompts: () => ({ prompts: [], diagnostics: [] }),
-					getExtensions: () => ({ errors: [] }),
+					getExtensions: () => ({ extensions: [], errors: [] }),
 					getThemes: () => ({ themes: [], diagnostics: [] }),
 				},
 			},

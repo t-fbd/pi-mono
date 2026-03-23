@@ -2450,6 +2450,41 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "/help ");
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
+
+		it("falls back to path completion when a command argument completer returns an empty list", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const provider = new CombinedAutocompleteProvider(
+				[
+					{
+						name: "scope",
+						description: "Manage scope",
+						getArgumentCompletions: (prefix: string) => {
+							if (prefix === "" || prefix === "a") return [{ value: "add", label: "add" }];
+							if (prefix === "add ") return [];
+							return null;
+						},
+					},
+				],
+				"/tmp",
+			);
+			editor.setAutocompleteProvider(provider);
+
+			editor.handleInput("/");
+			editor.handleInput("s");
+			editor.handleInput("c");
+			editor.handleInput("o");
+			editor.handleInput("p");
+			editor.handleInput("e");
+			editor.handleInput(" ");
+			editor.handleInput("a");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+			editor.handleInput("\t");
+			assert.strictEqual(editor.getText(), "/scope add");
+			editor.handleInput(" ");
+			assert.strictEqual(editor.getText(), "/scope add ");
+			editor.handleInput("\t");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+		});
 	});
 
 	describe("Character jump (Ctrl+])", () => {

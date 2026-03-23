@@ -189,6 +189,7 @@ export class InteractiveMode {
 
 	// Skill commands: command name -> skill file path
 	private skillCommands = new Map<string, string>();
+	private readonly scopeCommandActions = ["add", "rm", "reset"] as const;
 
 	// Agent subscription unsubscribe function
 	private unsubscribe?: () => void;
@@ -288,6 +289,40 @@ export class InteractiveMode {
 		initTheme(this.settingsManager.getTheme(), true);
 	}
 
+	private getScopeCommandCompletions(prefix: string): AutocompleteItem[] | null {
+		const trimmedPrefix = prefix.trimStart();
+		const parts = trimmedPrefix.split(/\s+/).filter(Boolean);
+		const hadTrailingSpace = trimmedPrefix.endsWith(" ");
+
+		if (parts.length === 0) {
+			return this.scopeCommandActions.map((action) => ({ value: action, label: action }));
+		}
+
+		if (parts.length === 1 && !hadTrailingSpace) {
+			const actionPrefix = parts[0] ?? "";
+			const matches = this.scopeCommandActions.filter((action) => action.startsWith(actionPrefix));
+			return matches.length > 0 ? matches.map((action) => ({ value: action, label: action })) : null;
+		}
+
+		const action = parts[0];
+		if (!action || (action !== "add" && action !== "rm")) {
+			return null;
+		}
+
+		if (action === "rm") {
+			const scopes = this.sessionManager.getScopePaths();
+			const removableScopes = scopes.slice(1);
+			if (removableScopes.length === 0) return null;
+			const pathPrefix = hadTrailingSpace ? "" : parts.slice(1).join(" ");
+			const matches = removableScopes.filter((scopePath) => scopePath.startsWith(pathPrefix));
+			if (matches.length === 0) return null;
+			return matches.map((scopePath) => ({ value: scopePath, label: scopePath }));
+		}
+
+		// For /scope add, fall back to normal path completion by returning null.
+		return null;
+	}
+
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
 		if (!sourceInfo) {
 			return undefined;
@@ -346,6 +381,12 @@ export class InteractiveMode {
 			name: command.name,
 			description: command.description,
 		}));
+
+		const scopeCommand = slashCommands.find((command) => command.name === "scope");
+		if (scopeCommand) {
+			scopeCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null =>
+				this.getScopeCommandCompletions(prefix);
+		}
 
 		const modelCommand = slashCommands.find((command) => command.name === "model");
 		if (modelCommand) {

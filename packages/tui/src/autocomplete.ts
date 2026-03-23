@@ -300,12 +300,22 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 				}
 
 				const argumentSuggestions = command.getArgumentCompletions(argumentText);
-				if (!argumentSuggestions || argumentSuggestions.length === 0) {
+				if (argumentSuggestions && argumentSuggestions.length > 0) {
+					return {
+						items: argumentSuggestions,
+						prefix: argumentText,
+					};
+				}
+
+				// If command-specific argument completion returns an empty list, fall back to normal path completion.
+				// This is useful for built-in commands whose first argument is structured but later arguments are paths.
+				const pathSuggestions = this.getFileSuggestions(argumentText);
+				if (pathSuggestions.length === 0) {
 					return null;
 				}
 
 				return {
-					items: argumentSuggestions,
+					items: pathSuggestions,
 					prefix: argumentText,
 				};
 			}
