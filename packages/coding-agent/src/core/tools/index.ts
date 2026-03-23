@@ -135,59 +135,65 @@ export type ToolName = keyof typeof allTools;
 export interface ToolsOptions {
 	read?: ReadToolOptions;
 	bash?: BashToolOptions;
+	scopePaths?: string[] | (() => string[]);
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
-		createReadToolDefinition(cwd, options?.read),
+		createReadToolDefinition(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
 		createBashToolDefinition(cwd, options?.bash),
-		createEditToolDefinition(cwd),
-		createWriteToolDefinition(cwd),
+		createEditToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		createWriteToolDefinition(cwd, { scopePaths: options?.scopePaths }),
 	];
 }
 
 export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
-		createReadToolDefinition(cwd, options?.read),
-		createGrepToolDefinition(cwd),
-		createFindToolDefinition(cwd),
-		createLsToolDefinition(cwd),
+		createReadToolDefinition(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
+		createGrepToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		createFindToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		createLsToolDefinition(cwd, { scopePaths: options?.scopePaths }),
 	];
 }
 
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
-		read: createReadToolDefinition(cwd, options?.read),
+		read: createReadToolDefinition(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
 		bash: createBashToolDefinition(cwd, options?.bash),
-		edit: createEditToolDefinition(cwd),
-		write: createWriteToolDefinition(cwd),
-		grep: createGrepToolDefinition(cwd),
-		find: createFindToolDefinition(cwd),
-		ls: createLsToolDefinition(cwd),
+		edit: createEditToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		write: createWriteToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		grep: createGrepToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		find: createFindToolDefinition(cwd, { scopePaths: options?.scopePaths }),
+		ls: createLsToolDefinition(cwd, { scopePaths: options?.scopePaths }),
 	};
 }
 
 export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 	return [
-		createReadTool(cwd, options?.read),
+		createReadTool(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
 		createBashTool(cwd, options?.bash),
-		createEditTool(cwd),
-		createWriteTool(cwd),
+		createEditTool(cwd, { scopePaths: options?.scopePaths }),
+		createWriteTool(cwd, { scopePaths: options?.scopePaths }),
 	];
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [createReadTool(cwd, options?.read), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
+	return [
+		createReadTool(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
+		createGrepTool(cwd, { scopePaths: options?.scopePaths }),
+		createFindTool(cwd, { scopePaths: options?.scopePaths }),
+		createLsTool(cwd, { scopePaths: options?.scopePaths }),
+	];
 }
 
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
-		read: createReadTool(cwd, options?.read),
+		read: createReadTool(cwd, { ...options?.read, scopePaths: options?.scopePaths }),
 		bash: createBashTool(cwd, options?.bash),
-		edit: createEditTool(cwd),
-		write: createWriteTool(cwd),
-		grep: createGrepTool(cwd),
-		find: createFindTool(cwd),
-		ls: createLsTool(cwd),
+		edit: createEditTool(cwd, { scopePaths: options?.scopePaths }),
+		write: createWriteTool(cwd, { scopePaths: options?.scopePaths }),
+		grep: createGrepTool(cwd, { scopePaths: options?.scopePaths }),
+		find: createFindTool(cwd, { scopePaths: options?.scopePaths }),
+		ls: createLsTool(cwd, { scopePaths: options?.scopePaths }),
 	};
 }

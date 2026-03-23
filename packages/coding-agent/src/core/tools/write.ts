@@ -35,6 +35,8 @@ const defaultWriteOperations: WriteOperations = {
 };
 
 export interface WriteToolOptions {
+	/** Scope paths used for relative file resolution. Primary scope is cwd. */
+	scopePaths?: string[] | (() => string[]);
 	/** Custom operations for file writing. Default: local filesystem */
 	operations?: WriteOperations;
 }
@@ -183,13 +185,17 @@ export function createWriteToolDefinition(
 	options?: WriteToolOptions,
 ): ToolDefinition<typeof writeSchema, undefined> {
 	const ops = options?.operations ?? defaultWriteOperations;
+	const scopePaths = options?.scopePaths;
 	return {
 		name: "write",
 		label: "write",
 		description:
 			"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
 		promptSnippet: "Create or overwrite files",
-		promptGuidelines: ["Use write only for new files or complete rewrites."],
+		promptGuidelines: [
+			"Use write only for new files or complete rewrites.",
+			"Relative mutation paths are resolved across scopes and fail when ambiguous.",
+		],
 		parameters: writeSchema,
 		async execute(
 			_toolCallId,
@@ -198,7 +204,7 @@ export function createWriteToolDefinition(
 			_onUpdate?,
 			_ctx?,
 		) {
-			const absolutePath = resolveToCwd(path, cwd);
+			const absolutePath = resolveToCwd(path, cwd, scopePaths);
 			const dir = dirname(absolutePath);
 			return withFileMutationQueue(
 				absolutePath,

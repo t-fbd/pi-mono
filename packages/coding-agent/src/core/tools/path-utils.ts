@@ -36,6 +36,33 @@ function normalizeAtPrefix(filePath: string): string {
 	return filePath.startsWith("@") ? filePath.slice(1) : filePath;
 }
 
+function uniquePaths(paths: string[]): string[] {
+	return [...new Set(paths)];
+}
+
+export type ScopePathsInput = string[] | (() => string[]);
+
+export function resolveScopePaths(cwd: string, scopePaths?: ScopePathsInput): string[] {
+	const paths = uniquePaths([cwd, ...(typeof scopePaths === "function" ? scopePaths() : (scopePaths ?? []))]);
+	return paths.filter((path) => path.length > 0);
+}
+
+/**
+ * Resolve one or more search roots for grep/find/ls.
+ * - Missing/"." path fans out across all scopes.
+ * - Any other path resolves to a single path (and can still be ambiguous).
+ */
+export function resolveSearchPaths(
+	searchPath: string | undefined,
+	cwd: string,
+	scopePaths?: ScopePathsInput,
+): string[] {
+	if (!searchPath || searchPath === ".") {
+		return resolveScopePaths(cwd, scopePaths);
+	}
+	return [resolveToCwd(searchPath, cwd, scopePaths)];
+}
+
 export function expandPath(filePath: string): string {
 	const normalized = normalizeUnicodeSpaces(normalizeAtPrefix(filePath));
 	if (normalized === "~") {
@@ -47,48 +74,76 @@ export function expandPath(filePath: string): string {
 	return normalized;
 }
 
-/**
- * Resolve a path relative to the given cwd.
- * Handles ~ expansion and absolute paths.
- */
-export function resolveToCwd(filePath: string, cwd: string): string {
-	const expanded = expandPath(filePath);
-	if (isAbsolute(expanded)) {
-		return expanded;
-	}
-	return resolvePath(cwd, expanded);
-}
-
-export function resolveReadPath(filePath: string, cwd: string): string {
-	const resolved = resolveToCwd(filePath, cwd);
-
-	if (fileExists(resolved)) {
-		return resolved;
-	}
+function resolveReadCandidate(filePath: string): string | undefined {
+	if (fileExists(filePath)) return filePath;
 
 	// Try macOS AM/PM variant (narrow no-break space before AM/PM)
-	const amPmVariant = tryMacOSScreenshotPath(resolved);
-	if (amPmVariant !== resolved && fileExists(amPmVariant)) {
+	const amPmVariant = tryMacOSScreenshotPath(filePath);
+	if (amPmVariant !== filePath && fileExists(amPmVariant)) {
 		return amPmVariant;
 	}
 
 	// Try NFD variant (macOS stores filenames in NFD form)
-	const nfdVariant = tryNFDVariant(resolved);
-	if (nfdVariant !== resolved && fileExists(nfdVariant)) {
+	const nfdVariant = tryNFDVariant(filePath);
+	if (nfdVariant !== filePath && fileExists(nfdVariant)) {
 		return nfdVariant;
 	}
 
 	// Try curly quote variant (macOS uses U+2019 in screenshot names)
-	const curlyVariant = tryCurlyQuoteVariant(resolved);
-	if (curlyVariant !== resolved && fileExists(curlyVariant)) {
+	const curlyVariant = tryCurlyQuoteVariant(filePath);
+	if (curlyVariant !== filePath && fileExists(curlyVariant)) {
 		return curlyVariant;
 	}
 
 	// Try combined NFD + curly quote (for French macOS screenshots like "Capture d'écran")
 	const nfdCurlyVariant = tryCurlyQuoteVariant(nfdVariant);
-	if (nfdCurlyVariant !== resolved && fileExists(nfdCurlyVariant)) {
+	if (nfdCurlyVariant !== filePath && fileExists(nfdCurlyVariant)) {
 		return nfdCurlyVariant;
 	}
 
-	return resolved;
+	return undefined;
+}
+
+function ambiguousPathError(filePath: string, matches: string[]): Error {
+	return new Error(
+		`Ambiguous relative path: ${filePath}\nMatches multiple scopes:\n${matches.map((path) => `- ${path}`).join("\n")}`,
+	);
+}
+
+/**
+ * Resolve a path relative to the given cwd.
+ * Handles ~ expansion and absolute paths.
+ */
+export function resolveToCwd(filePath: string, cwd: string, scopePaths?: ScopePathsInput): string {
+	const expanded = expandPath(filePath);
+	if (isAbsolute(expanded)) {
+		return expanded;
+	}
+
+	const scopeBases = resolveScopePaths(cwd, scopePaths);
+	const matches = scopeBases.map((base) => resolvePath(base, expanded)).filter((candidate) => fileExists(candidate));
+
+	if (matches.length > 1) {
+		throw ambiguousPathError(filePath, matches);
+	}
+
+	return matches[0] ?? resolvePath(scopeBases[0], expanded);
+}
+
+export function resolveReadPath(filePath: string, cwd: string, scopePaths?: ScopePathsInput): string {
+	const expanded = expandPath(filePath);
+	if (isAbsolute(expanded)) {
+		return resolveReadCandidate(expanded) ?? expanded;
+	}
+
+	const scopeBases = resolveScopePaths(cwd, scopePaths);
+	const matches = scopeBases
+		.map((base) => resolveReadCandidate(resolvePath(base, expanded)))
+		.filter((candidate): candidate is string => candidate !== undefined);
+
+	if (matches.length > 1) {
+		throw ambiguousPathError(filePath, matches);
+	}
+
+	return matches[0] ?? resolvePath(scopeBases[0], expanded);
 }

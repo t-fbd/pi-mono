@@ -674,6 +674,19 @@ describe("ExtensionRunner", () => {
 		});
 	});
 
+	describe("context", () => {
+		it("exposes session scope paths through extension context", () => {
+			sessionManager.addScopePath("/secondary");
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, sessionManager, modelRegistry);
+			runner.bindCore(extensionActions, extensionContextActions);
+
+			const context = runner.createContext();
+			expect(typeof context.sessionManager.getScopePaths).toBe("function");
+			expect(context.sessionManager.getScopePaths()).toEqual(sessionManager.getScopePaths());
+		});
+	});
+
 	describe("hasHandlers", () => {
 		it("returns true when handlers exist for event type", async () => {
 			const extCode = `

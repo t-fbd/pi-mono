@@ -20,6 +20,8 @@ export interface BuildSystemPromptOptions {
 	cwd?: string;
 	/** Pre-loaded context files. */
 	contextFiles?: Array<{ path: string; content: string }>;
+	/** Ordered scope paths (primary first). */
+	scopePaths?: string[];
 	/** Pre-loaded skills. */
 	skills?: Skill[];
 }
@@ -34,6 +36,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		appendSystemPrompt,
 		cwd,
 		contextFiles: providedContextFiles,
+		scopePaths: providedScopePaths,
 		skills: providedSkills,
 	} = options;
 	const resolvedCwd = cwd ?? process.cwd();
@@ -44,6 +47,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
 	const contextFiles = providedContextFiles ?? [];
+	const scopePaths = providedScopePaths ?? [];
 	const skills = providedSkills ?? [];
 
 	if (customPrompt) {
@@ -71,6 +75,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		// Add date and working directory last
 		prompt += `\nCurrent date: ${date}`;
 		prompt += `\nCurrent working directory: ${promptCwd}`;
+		if (scopePaths.length > 0) {
+			prompt += `\nCurrent scopes:\n- primary: ${scopePaths[0]}`;
+			for (const scopePath of scopePaths.slice(1)) {
+				prompt += `\n- additional: ${scopePath}`;
+			}
+		}
 
 		return prompt;
 	}
@@ -108,7 +118,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
 	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
-		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+		addGuideline(
+			"Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore, and can search all scopes by default)",
+		);
 	}
 
 	for (const guideline of promptGuidelines ?? []) {
@@ -163,6 +175,12 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	// Add date and working directory last
 	prompt += `\nCurrent date: ${date}`;
 	prompt += `\nCurrent working directory: ${promptCwd}`;
+	if (scopePaths.length > 0) {
+		prompt += `\nCurrent scopes:\n- primary: ${scopePaths[0]}`;
+		for (const scopePath of scopePaths.slice(1)) {
+			prompt += `\n- additional: ${scopePath}`;
+		}
+	}
 
 	return prompt;
 }

@@ -5,7 +5,7 @@ import { existsSync, readdirSync, statSync } from "fs";
 import nodePath from "path";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveSearchPaths } from "./path-utils.js";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
@@ -44,6 +44,8 @@ const defaultLsOperations: LsOperations = {
 };
 
 export interface LsToolOptions {
+	/** Scope paths used for relative file resolution. Primary scope is cwd. */
+	scopePaths?: string[] | (() => string[]);
 	/** Custom operations for directory listing. Default: local filesystem */
 	operations?: LsOperations;
 }
@@ -101,11 +103,12 @@ export function createLsToolDefinition(
 	options?: LsToolOptions,
 ): ToolDefinition<typeof lsSchema, LsToolDetails | undefined> {
 	const ops = options?.operations ?? defaultLsOperations;
+	const scopePaths = options?.scopePaths;
 	return {
 		name: "ls",
 		label: "ls",
 		description: `List directory contents. Returns entries sorted alphabetically, with '/' suffix for directories. Includes dotfiles. Output is truncated to ${DEFAULT_LIMIT} entries or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
-		promptSnippet: "List directory contents",
+		promptSnippet: "List directory contents (defaults to all scopes)",
 		parameters: lsSchema,
 		async execute(
 			_toolCallId,
@@ -125,53 +128,65 @@ export function createLsToolDefinition(
 
 				(async () => {
 					try {
-						const dirPath = resolveToCwd(path || ".", cwd);
+						const dirPaths = resolveSearchPaths(path, cwd, scopePaths);
+						const singleDirPath = dirPaths.length === 1 ? dirPaths[0] : undefined;
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
-						// Check if path exists.
-						if (!(await ops.exists(dirPath))) {
-							reject(new Error(`Path not found: ${dirPath}`));
-							return;
-						}
-
-						// Check if path is a directory.
-						const stat = await ops.stat(dirPath);
-						if (!stat.isDirectory()) {
-							reject(new Error(`Not a directory: ${dirPath}`));
-							return;
-						}
-
 						// Read directory entries.
-						let entries: string[];
-						try {
-							entries = await ops.readdir(dirPath);
-						} catch (e: any) {
-							reject(new Error(`Cannot read directory: ${e.message}`));
-							return;
-						}
-
-						// Sort alphabetically, case-insensitive.
-						entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-
-						// Format entries with directory indicators.
 						const results: string[] = [];
 						let entryLimitReached = false;
-						for (const entry of entries) {
+						for (const dirPath of dirPaths) {
 							if (results.length >= effectiveLimit) {
 								entryLimitReached = true;
 								break;
 							}
 
-							const fullPath = nodePath.join(dirPath, entry);
-							let suffix = "";
-							try {
-								const entryStat = await ops.stat(fullPath);
-								if (entryStat.isDirectory()) suffix = "/";
-							} catch {
-								// Skip entries we cannot stat.
-								continue;
+							// Check if path exists.
+							if (!(await ops.exists(dirPath))) {
+								reject(new Error(`Path not found: ${dirPath}`));
+								return;
 							}
-							results.push(entry + suffix);
+
+							// Check if path is a directory.
+							const stat = await ops.stat(dirPath);
+							if (!stat.isDirectory()) {
+								reject(new Error(`Not a directory: ${dirPath}`));
+								return;
+							}
+
+							let entries: string[];
+							try {
+								entries = await ops.readdir(dirPath);
+							} catch (e: any) {
+								reject(new Error(`Cannot read directory: ${e.message}`));
+								return;
+							}
+
+							// Sort alphabetically, case-insensitive.
+							entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+
+							for (const entry of entries) {
+								if (results.length >= effectiveLimit) {
+									entryLimitReached = true;
+									break;
+								}
+
+								const fullPath = nodePath.join(dirPath, entry);
+								let suffix = "";
+								try {
+									const entryStat = await ops.stat(fullPath);
+									if (entryStat.isDirectory()) suffix = "/";
+								} catch {
+									// Skip entries we cannot stat.
+									continue;
+								}
+
+								if (singleDirPath) {
+									results.push(entry + suffix);
+								} else {
+									results.push(`${nodePath.basename(dirPath)}/${entry}${suffix}`);
+								}
+							}
 						}
 
 						signal?.removeEventListener("abort", onAbort);
