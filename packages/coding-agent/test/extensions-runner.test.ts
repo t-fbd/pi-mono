@@ -685,6 +685,63 @@ describe("ExtensionRunner", () => {
 			expect(typeof context.sessionManager.getScopePaths).toBe("function");
 			expect(context.sessionManager.getScopePaths()).toEqual(sessionManager.getScopePaths());
 		});
+
+		it("resolvePath resolves relative paths against cwd", () => {
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, sessionManager, modelRegistry);
+			runner.bindCore(extensionActions, extensionContextActions);
+
+			const context = runner.createContext();
+			expect(context.resolvePath).toBeDefined();
+			expect(typeof context.resolvePath).toBe("function");
+
+			// Absolute paths are returned as-is
+			expect(context.resolvePath("/absolute/path")).toBe("/absolute/path");
+
+			// Relative paths resolve against cwd
+			const resolved = context.resolvePath("relative/path");
+			expect(resolved).toBe(path.join(tempDir, "relative/path"));
+		});
+
+		it("resolveSearchPath fans out across all scopes for undefined or dot", () => {
+			// Create sessionManager with tempDir as cwd so scope paths align
+			const scopedSessionManager = SessionManager.inMemory(tempDir);
+			scopedSessionManager.addScopePath(path.join(tempDir, "scope1"));
+			scopedSessionManager.addScopePath(path.join(tempDir, "scope2"));
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, scopedSessionManager, modelRegistry);
+			runner.bindCore(extensionActions, extensionContextActions);
+
+			const context = runner.createContext();
+			expect(context.resolveSearchPath).toBeDefined();
+			expect(typeof context.resolveSearchPath).toBe("function");
+
+			// undefined fans out to all scopes
+			const undefinedResult = context.resolveSearchPath(undefined);
+			expect(undefinedResult).toHaveLength(3);
+			expect(undefinedResult[0]).toBe(tempDir);
+			expect(undefinedResult[1]).toBe(path.join(tempDir, "scope1"));
+			expect(undefinedResult[2]).toBe(path.join(tempDir, "scope2"));
+
+			// "." also fans out
+			const dotResult = context.resolveSearchPath(".");
+			expect(dotResult).toEqual(undefinedResult);
+		});
+
+		it("resolveSearchPath resolves single path for non-empty input", () => {
+			// Create sessionManager with tempDir as cwd
+			const scopedSessionManager = SessionManager.inMemory(tempDir);
+			const runtime = createExtensionRuntime();
+			const runner = new ExtensionRunner([], runtime, tempDir, scopedSessionManager, modelRegistry);
+			runner.bindCore(extensionActions, extensionContextActions);
+
+			const context = runner.createContext();
+
+			// Non-empty path resolves to single path
+			const result = context.resolveSearchPath("src");
+			expect(result).toHaveLength(1);
+			expect(result[0]).toBe(path.join(tempDir, "src"));
+		});
 	});
 
 	describe("hasHandlers", () => {

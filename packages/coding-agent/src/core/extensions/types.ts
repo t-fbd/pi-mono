@@ -286,6 +286,20 @@ export interface ExtensionContext {
 	compact(options?: CompactOptions): void;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string;
+	/**
+	 * Resolve a file path across scopes. Use for read/write/edit operations.
+	 * - Absolute paths are returned as-is.
+	 * - Relative paths are resolved against all scope paths.
+	 * - Throws if a relative path matches files in multiple scopes (ambiguous).
+	 * - Falls back to primary scope (cwd) if no match found.
+	 */
+	resolvePath(path: string): string;
+	/**
+	 * Resolve search paths for grep/find/ls operations.
+	 * - Undefined or "." fans out across all scope paths.
+	 * - Any other path resolves to a single path (via resolvePath).
+	 */
+	resolveSearchPath(path?: string): string[];
 }
 
 /**

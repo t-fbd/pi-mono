@@ -10,6 +10,7 @@ import type { ResourceDiagnostic } from "../diagnostics.js";
 import type { KeybindingsConfig } from "../keybindings.js";
 import type { ModelRegistry } from "../model-registry.js";
 import type { SessionManager } from "../session-manager.js";
+import { resolveReadPath, resolveSearchPaths } from "../tools/path-utils.js";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -531,10 +532,12 @@ export class ExtensionRunner {
 	 */
 	createContext(): ExtensionContext {
 		const getModel = this.getModel;
+		const cwd = this.cwd;
+		const scopePaths = () => this.sessionManager.getScopePaths();
 		return {
 			ui: this.uiContext,
 			hasUI: this.hasUI(),
-			cwd: this.cwd,
+			cwd,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			get model() {
@@ -547,6 +550,8 @@ export class ExtensionRunner {
 			getContextUsage: () => this.getContextUsageFn(),
 			compact: (options) => this.compactFn(options),
 			getSystemPrompt: () => this.getSystemPromptFn(),
+			resolvePath: (path) => resolveReadPath(path, cwd, scopePaths),
+			resolveSearchPath: (path) => resolveSearchPaths(path, cwd, scopePaths),
 		};
 	}
 

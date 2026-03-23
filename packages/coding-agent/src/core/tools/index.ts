@@ -53,6 +53,14 @@ export {
 	lsToolDefinition,
 } from "./ls.js";
 export {
+	expandPath,
+	resolveReadPath,
+	resolveScopePaths,
+	resolveSearchPaths,
+	resolveToCwd,
+	type ScopePathsInput,
+} from "./path-utils.js";
+export {
 	createReadTool,
 	createReadToolDefinition,
 	type ReadOperations,

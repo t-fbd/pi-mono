@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `ctx.resolvePath()` and `ctx.resolveSearchPath()` helpers for extensions to properly resolve paths across scopes. Extensions should use these instead of manually resolving against `ctx.cwd` to respect user-configured scope paths.
+
+### Changed
+
+- Exported path utilities (`resolveReadPath`, `resolveSearchPaths`, `resolveToCwd`, `resolveScopePaths`, `expandPath`, `ScopePathsInput`) from `@mariozechner/pi-coding-agent/tools` for extension use.
+
 ## [0.62.0] - 2026-03-23
 
 ### New Features

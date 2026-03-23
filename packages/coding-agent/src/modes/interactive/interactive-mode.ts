@@ -64,6 +64,7 @@ import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
+import { resolveReadPath, resolveSearchPaths } from "../../core/tools/path-utils.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
@@ -1310,10 +1311,12 @@ export class InteractiveMode {
 		if (shortcuts.size === 0) return;
 
 		// Create a context for shortcut handlers
+		const cwd = process.cwd();
+		const scopePaths = () => this.sessionManager.getScopePaths();
 		const createContext = (): ExtensionContext => ({
 			ui: this.createExtensionUIContext(),
 			hasUI: true,
-			cwd: process.cwd(),
+			cwd,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.session.modelRegistry,
 			model: this.session.model,
@@ -1338,6 +1341,8 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			resolvePath: (path) => resolveReadPath(path, cwd, scopePaths),
+			resolveSearchPath: (path) => resolveSearchPaths(path, cwd, scopePaths),
 		});
 
 		// Set up the extension shortcut handler on the default editor
