@@ -69,6 +69,22 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
+	describe("scope rendering", () => {
+		test("includes primary and additional scope paths", () => {
+			const prompt = buildSystemPrompt({
+				cwd: "/primary",
+				scopePaths: ["/primary", "/secondary"],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).toContain("Current working directory: /primary");
+			expect(prompt).toContain("Current scopes:");
+			expect(prompt).toContain("- primary: /primary");
+			expect(prompt).toContain("- additional: /secondary");
+		});
+	});
+
 	describe("prompt guidelines", () => {
 		test("appends promptGuidelines to default guidelines", () => {
 			const prompt = buildSystemPrompt({
@@ -90,6 +106,16 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
+		});
+
+		test("mentions multi-scope search behavior when grep/find/ls are available", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["bash", "grep", "find", "ls"],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).toContain("can search all scopes by default");
 		});
 	});
 });

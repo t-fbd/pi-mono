@@ -62,6 +62,8 @@ const defaultEditOperations: EditOperations = {
 };
 
 export interface EditToolOptions {
+	/** Scope paths used for relative file resolution. Primary scope is cwd. */
+	scopePaths?: string[] | (() => string[]);
 	/** Custom operations for file editing. Default: local filesystem */
 	operations?: EditOperations;
 }
@@ -120,13 +122,17 @@ export function createEditToolDefinition(
 	options?: EditToolOptions,
 ): ToolDefinition<typeof editSchema, EditToolDetails | undefined, EditRenderState> {
 	const ops = options?.operations ?? defaultEditOperations;
+	const scopePaths = options?.scopePaths;
 	return {
 		name: "edit",
 		label: "edit",
 		description:
 			"Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
 		promptSnippet: "Make surgical edits to files (find exact text and replace)",
-		promptGuidelines: ["Use edit for precise changes (old text must match exactly)."],
+		promptGuidelines: [
+			"Use edit for precise changes (old text must match exactly).",
+			"Relative mutation paths are resolved across scopes and fail when ambiguous.",
+		],
 		parameters: editSchema,
 		async execute(
 			_toolCallId,
@@ -135,7 +141,7 @@ export function createEditToolDefinition(
 			_onUpdate?,
 			_ctx?,
 		) {
-			const absolutePath = resolveToCwd(path, cwd);
+			const absolutePath = resolveToCwd(path, cwd, scopePaths);
 
 			return withFileMutationQueue(
 				absolutePath,

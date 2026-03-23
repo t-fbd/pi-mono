@@ -48,6 +48,8 @@ const defaultReadOperations: ReadOperations = {
 export interface ReadToolOptions {
 	/** Whether to auto-resize images to 2000x2000 max. Default: true */
 	autoResizeImages?: boolean;
+	/** Scope paths used for relative file resolution. Primary scope is cwd. */
+	scopePaths?: string[] | (() => string[]);
 	/** Custom operations for file reading. Default: local filesystem */
 	operations?: ReadOperations;
 }
@@ -117,12 +119,16 @@ export function createReadToolDefinition(
 ): ToolDefinition<typeof readSchema, ReadToolDetails | undefined> {
 	const autoResizeImages = options?.autoResizeImages ?? true;
 	const ops = options?.operations ?? defaultReadOperations;
+	const scopePaths = options?.scopePaths;
 	return {
 		name: "read",
 		label: "read",
 		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
 		promptSnippet: "Read file contents",
-		promptGuidelines: ["Use read to examine files instead of cat or sed."],
+		promptGuidelines: [
+			"Use read to examine files instead of cat or sed.",
+			"Relative read paths are resolved across scopes and fail when ambiguous.",
+		],
 		parameters: readSchema,
 		async execute(
 			_toolCallId,
@@ -131,7 +137,7 @@ export function createReadToolDefinition(
 			_onUpdate?,
 			_ctx?,
 		) {
-			const absolutePath = resolveReadPath(path, cwd);
+			const absolutePath = resolveReadPath(path, cwd, scopePaths);
 			return new Promise<{ content: (TextContent | ImageContent)[]; details: ReadToolDetails | undefined }>(
 				(resolve, reject) => {
 					if (signal?.aborted) {

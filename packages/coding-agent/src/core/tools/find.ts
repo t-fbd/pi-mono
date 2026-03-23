@@ -8,7 +8,7 @@ import path from "path";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveSearchPaths } from "./path-utils.js";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
@@ -52,6 +52,8 @@ const defaultFindOperations: FindOperations = {
 };
 
 export interface FindToolOptions {
+	/** Scope paths used for relative file resolution. Primary scope is cwd. */
+	scopePaths?: string[] | (() => string[]);
 	/** Custom operations for find. Default: local filesystem plus fd */
 	operations?: FindOperations;
 }
@@ -114,11 +116,12 @@ export function createFindToolDefinition(
 	options?: FindToolOptions,
 ): ToolDefinition<typeof findSchema, FindToolDetails | undefined> {
 	const customOps = options?.operations;
+	const scopePaths = options?.scopePaths;
 	return {
 		name: "find",
 		label: "find",
 		description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
-		promptSnippet: "Find files by glob pattern (respects .gitignore)",
+		promptSnippet: "Find files by glob pattern (respects .gitignore, defaults to all scopes)",
 		parameters: findSchema,
 		async execute(
 			_toolCallId,
@@ -138,22 +141,31 @@ export function createFindToolDefinition(
 
 				(async () => {
 					try {
-						const searchPath = resolveToCwd(searchDir || ".", cwd);
+						const searchPaths = resolveSearchPaths(searchDir, cwd, scopePaths);
+						const searchPath = searchPaths.length === 1 ? searchPaths[0] : undefined;
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 						const ops = customOps ?? defaultFindOperations;
 
 						// If custom operations provide glob(), use that instead of fd.
 						if (customOps?.glob) {
-							if (!(await ops.exists(searchPath))) {
-								reject(new Error(`Path not found: ${searchPath}`));
-								return;
+							const allResults: string[] = [];
+							for (const root of searchPaths) {
+								if (!(await ops.exists(root))) {
+									reject(new Error(`Path not found: ${root}`));
+									return;
+								}
+								const remainingLimit = Math.max(0, effectiveLimit - allResults.length);
+								if (remainingLimit === 0) break;
+								const results = await ops.glob(pattern, root, {
+									ignore: ["**/node_modules/**", "**/.git/**"],
+									limit: remainingLimit,
+								});
+								for (const result of results) {
+									allResults.push(result.startsWith(root) ? result : path.resolve(root, result));
+								}
 							}
-							const results = await ops.glob(pattern, searchPath, {
-								ignore: ["**/node_modules/**", "**/.git/**"],
-								limit: effectiveLimit,
-							});
 							signal?.removeEventListener("abort", onAbort);
-							if (results.length === 0) {
+							if (allResults.length === 0) {
 								resolve({
 									content: [{ type: "text", text: "No files found matching pattern" }],
 									details: undefined,
@@ -162,11 +174,20 @@ export function createFindToolDefinition(
 							}
 
 							// Relativize paths against the search root for stable output.
-							const relativized = results.map((p) => {
-								if (p.startsWith(searchPath)) return toPosixPath(p.slice(searchPath.length + 1));
-								return toPosixPath(path.relative(searchPath, p));
+							const relativized = allResults.map((p) => {
+								if (searchPath) {
+									if (p.startsWith(searchPath)) return toPosixPath(p.slice(searchPath.length + 1));
+									return toPosixPath(path.relative(searchPath, p));
+								}
+								for (const root of searchPaths) {
+									const relative = path.relative(root, p);
+									if (relative && !relative.startsWith("..")) {
+										return toPosixPath(`${path.basename(root)}/${relative}`);
+									}
+								}
+								return toPosixPath(path.basename(p));
 							});
-							const resultLimitReached = relativized.length >= effectiveLimit;
+							const resultLimitReached = allResults.length >= effectiveLimit;
 							const rawOutput = relativized.join("\n");
 							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
 							let resultOutput = truncation.content;
@@ -205,23 +226,25 @@ export function createFindToolDefinition(
 							"--max-results",
 							String(effectiveLimit),
 						];
-						// Include .gitignore files from the search tree.
+						// Include .gitignore files from all search trees.
 						const gitignoreFiles = new Set<string>();
-						const rootGitignore = path.join(searchPath, ".gitignore");
-						if (existsSync(rootGitignore)) gitignoreFiles.add(rootGitignore);
-						try {
-							const nestedGitignores = globSync("**/.gitignore", {
-								cwd: searchPath,
-								dot: true,
-								absolute: true,
-								ignore: ["**/node_modules/**", "**/.git/**"],
-							});
-							for (const file of nestedGitignores) gitignoreFiles.add(file);
-						} catch {
-							// ignore
+						for (const root of searchPaths) {
+							const rootGitignore = path.join(root, ".gitignore");
+							if (existsSync(rootGitignore)) gitignoreFiles.add(rootGitignore);
+							try {
+								const nestedGitignores = globSync("**/.gitignore", {
+									cwd: root,
+									dot: true,
+									absolute: true,
+									ignore: ["**/node_modules/**", "**/.git/**"],
+								});
+								for (const file of nestedGitignores) gitignoreFiles.add(file);
+							} catch {
+								// ignore
+							}
 						}
 						for (const gitignorePath of gitignoreFiles) args.push("--ignore-file", gitignorePath);
-						args.push(pattern, searchPath);
+						args.push(pattern, ...searchPaths);
 
 						const result = spawnSync(fdPath, args, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
 						signal?.removeEventListener("abort", onAbort);
@@ -253,10 +276,20 @@ export function createFindToolDefinition(
 							if (!line) continue;
 							const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
 							let relativePath = line;
-							if (line.startsWith(searchPath)) {
-								relativePath = line.slice(searchPath.length + 1);
+							if (searchPath) {
+								if (line.startsWith(searchPath)) {
+									relativePath = line.slice(searchPath.length + 1);
+								} else {
+									relativePath = path.relative(searchPath, line);
+								}
 							} else {
-								relativePath = path.relative(searchPath, line);
+								for (const root of searchPaths) {
+									const relative = path.relative(root, line);
+									if (relative && !relative.startsWith("..")) {
+										relativePath = `${path.basename(root)}/${relative}`;
+										break;
+									}
+								}
 							}
 							if (hadTrailingSlash && !relativePath.endsWith("/")) relativePath += "/";
 							relativized.push(toPosixPath(relativePath));

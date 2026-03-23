@@ -314,6 +314,8 @@ async function prepareInitialMessage(
 	parsed: Args,
 	autoResizeImages: boolean,
 	stdinContent?: string,
+	scopePaths?: string[],
+	cwd?: string,
 ): Promise<{
 	initialMessage?: string;
 	initialImages?: ImageContent[];
@@ -322,7 +324,7 @@ async function prepareInitialMessage(
 		return buildInitialMessage({ parsed, stdinContent });
 	}
 
-	const { text, images } = await processFileArguments(parsed.fileArgs, { autoResizeImages });
+	const { text, images } = await processFileArguments(parsed.fileArgs, { autoResizeImages, scopePaths, cwd });
 	return buildInitialMessage({
 		parsed,
 		fileText: text,
@@ -753,12 +755,17 @@ export async function main(args: string[]) {
 
 	validateForkFlags(parsed);
 
-	const { initialMessage, initialImages } = await prepareInitialMessage(
+	const isInteractive = !parsed.print && parsed.mode === undefined;
+	// Create session manager early so @file paths can resolve against session scopes.
+	let sessionManager = await createSessionManager(parsed, cwd, extensionsResult);
+
+	let { initialMessage, initialImages } = await prepareInitialMessage(
 		parsed,
 		settingsManager.getImageAutoResize(),
 		stdinContent,
+		sessionManager?.getScopePaths(),
+		cwd,
 	);
-	const isInteractive = !parsed.print && parsed.mode === undefined;
 	const startupBenchmark = isTruthyEnvFlag(process.env.PI_STARTUP_BENCHMARK);
 	if (startupBenchmark && !isInteractive) {
 		console.error(chalk.red("Error: PI_STARTUP_BENCHMARK only supports interactive mode"));
@@ -778,9 +785,6 @@ export async function main(args: string[]) {
 		scopedModels = await resolveModelScope(modelPatterns, modelRegistry);
 	}
 
-	// Create session manager based on CLI flags
-	let sessionManager = await createSessionManager(parsed, cwd, extensionsResult);
-
 	// Handle --resume: show session picker
 	if (parsed.resume) {
 		// Compute effective session dir for resume (same logic as createSessionManager)
@@ -796,6 +800,17 @@ export async function main(args: string[]) {
 			process.exit(0);
 		}
 		sessionManager = SessionManager.open(selectedPath, effectiveSessionDir);
+
+		// Rebuild initial message so @file paths can resolve using resumed session scopes.
+		const initial = await prepareInitialMessage(
+			parsed,
+			settingsManager.getImageAutoResize(),
+			stdinContent,
+			sessionManager.getScopePaths(),
+			cwd,
+		);
+		initialMessage = initial.initialMessage;
+		initialImages = initial.initialImages;
 	}
 
 	const { options: sessionOptions, cliThinkingFromModel } = buildSessionOptions(

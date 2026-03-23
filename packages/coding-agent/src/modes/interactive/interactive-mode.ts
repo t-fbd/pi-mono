@@ -2000,6 +2000,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/scope" || text.startsWith("/scope ")) {
+				this.handleScopeCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/changelog") {
 				this.handleChangelogCommand();
 				this.editor.setText("");
@@ -4200,6 +4205,49 @@ export class InteractiveMode {
 	 */
 	private getEditorKeyDisplay(action: Keybinding): string {
 		return this.capitalizeKey(keyText(action));
+	}
+
+	private handleScopeCommand(text: string): void {
+		const rest = text.slice("/scope".length).trim();
+		if (!rest) {
+			const scopes = this.sessionManager.getScopePaths();
+			const primary = scopes[0] ?? this.sessionManager.getCwd();
+			const details = [
+				`Scopes:`,
+				`- primary: ${primary}`,
+				...scopes.slice(1).map((scope) => `- additional: ${scope}`),
+			].join("\n");
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(theme.fg("dim", details), 1, 0));
+			this.ui.requestRender();
+			return;
+		}
+
+		const [subcommand, ...argParts] = rest.split(/\s+/);
+		const arg = argParts.join(" ").trim();
+		if (subcommand === "reset") {
+			this.sessionManager.resetScopePaths();
+			this.session.refreshSystemPrompt();
+			this.showStatus("Scopes reset");
+			return;
+		}
+		if (!arg || (subcommand !== "add" && subcommand !== "rm")) {
+			this.showWarning("Usage: /scope add <path> | /scope rm <path> | /scope reset");
+			return;
+		}
+		if (subcommand === "add") {
+			this.sessionManager.addScopePath(arg);
+			this.session.refreshSystemPrompt();
+			this.showStatus(`Scope added: ${arg}`);
+			return;
+		}
+		if (subcommand === "rm") {
+			this.sessionManager.removeScopePath(arg);
+			this.session.refreshSystemPrompt();
+			this.showStatus(`Scope removed: ${arg}`);
+			return;
+		}
+		this.showWarning("Usage: /scope add <path> | /scope rm <path> | /scope reset");
 	}
 
 	private handleHotkeysCommand(): void {

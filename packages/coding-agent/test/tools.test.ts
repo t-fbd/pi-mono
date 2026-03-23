@@ -1,15 +1,15 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBash } from "../src/core/bash-executor.js";
 import { bashTool, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.js";
-import { editTool } from "../src/core/tools/edit.js";
-import { findTool } from "../src/core/tools/find.js";
-import { grepTool } from "../src/core/tools/grep.js";
-import { lsTool } from "../src/core/tools/ls.js";
-import { readTool } from "../src/core/tools/read.js";
-import { writeTool } from "../src/core/tools/write.js";
+import { createEditTool } from "../src/core/tools/edit.js";
+import { createFindTool } from "../src/core/tools/find.js";
+import { createGrepTool } from "../src/core/tools/grep.js";
+import { createLsTool } from "../src/core/tools/ls.js";
+import { createReadTool } from "../src/core/tools/read.js";
+import { createWriteTool } from "../src/core/tools/write.js";
 import * as shellModule from "../src/utils/shell.js";
 
 // Helper to extract text from content blocks
@@ -24,11 +24,23 @@ function getTextOutput(result: any): string {
 
 describe("Coding Agent Tools", () => {
 	let testDir: string;
+	let readTool: ReturnType<typeof createReadTool>;
+	let writeTool: ReturnType<typeof createWriteTool>;
+	let editTool: ReturnType<typeof createEditTool>;
+	let grepTool: ReturnType<typeof createGrepTool>;
+	let findTool: ReturnType<typeof createFindTool>;
+	let lsTool: ReturnType<typeof createLsTool>;
 
 	beforeEach(() => {
 		// Create a unique temporary directory for each test
-		testDir = join(tmpdir(), `coding-agent-test-${Date.now()}`);
+		testDir = mkdtempSync(join(tmpdir(), "coding-agent-test-"));
 		mkdirSync(testDir, { recursive: true });
+		readTool = createReadTool(testDir, { autoResizeImages: false });
+		writeTool = createWriteTool(testDir);
+		editTool = createEditTool(testDir);
+		grepTool = createGrepTool(testDir);
+		findTool = createFindTool(testDir);
+		lsTool = createLsTool(testDir);
 	});
 
 	afterEach(() => {
@@ -347,6 +359,146 @@ describe("Coding Agent Tools", () => {
 		});
 	});
 
+	describe("scope behavior", () => {
+		it("grep fans out across scopes by default", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.txt"), "needle");
+			writeFileSync(join(scopeB, "b.txt"), "needle");
+
+			const scopedGrep = createGrepTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedGrep.execute("scope-grep-1", { pattern: "needle" });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.txt:1: needle");
+			expect(output).toContain("scope-b/b.txt:1: needle");
+		});
+
+		it("grep fans out across scopes for explicit '.' path", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.txt"), "needle");
+			writeFileSync(join(scopeB, "b.txt"), "needle");
+
+			const scopedGrep = createGrepTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedGrep.execute("scope-grep-dot-1", { pattern: "needle", path: "." });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.txt:1: needle");
+			expect(output).toContain("scope-b/b.txt:1: needle");
+		});
+
+		it("find fans out across scopes by default", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.ts"), "export const a = 1;\n");
+			writeFileSync(join(scopeB, "b.ts"), "export const b = 2;\n");
+
+			const scopedFind = createFindTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedFind.execute("scope-find-1", { pattern: "**/*.ts" });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.ts");
+			expect(output).toContain("scope-b/b.ts");
+		});
+
+		it("find fans out across scopes for explicit '.' path", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.ts"), "export const a = 1;\n");
+			writeFileSync(join(scopeB, "b.ts"), "export const b = 2;\n");
+
+			const scopedFind = createFindTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedFind.execute("scope-find-dot-1", { pattern: "**/*.ts", path: "." });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.ts");
+			expect(output).toContain("scope-b/b.ts");
+		});
+
+		it("ls fans out across scopes by default", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.txt"), "a");
+			writeFileSync(join(scopeB, "b.txt"), "b");
+
+			const scopedLs = createLsTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedLs.execute("scope-ls-1", {});
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.txt");
+			expect(output).toContain("scope-b/b.txt");
+		});
+
+		it("ls fans out across scopes for explicit '.' path", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "a.txt"), "a");
+			writeFileSync(join(scopeB, "b.txt"), "b");
+
+			const scopedLs = createLsTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			const result = await scopedLs.execute("scope-ls-dot-1", { path: "." });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("scope-a/a.txt");
+			expect(output).toContain("scope-b/b.txt");
+		});
+
+		it("read rejects ambiguous relative paths across scopes", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "same.txt"), "a");
+			writeFileSync(join(scopeB, "same.txt"), "b");
+
+			const scopedRead = createReadTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			await expect(scopedRead.execute("scope-read-1", { path: "same.txt" })).rejects.toThrow(
+				/Ambiguous relative path/,
+			);
+		});
+
+		it("edit rejects ambiguous relative mutation paths across scopes", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "same.txt"), "hello");
+			writeFileSync(join(scopeB, "same.txt"), "hello");
+
+			const scopedEdit = createEditTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			await expect(
+				scopedEdit.execute("scope-edit-1", { path: "same.txt", oldText: "hello", newText: "hi" }),
+			).rejects.toThrow(/Ambiguous relative path/);
+		});
+
+		it("write rejects ambiguous relative mutation paths across scopes", async () => {
+			const scopeA = join(testDir, "scope-a");
+			const scopeB = join(testDir, "scope-b");
+			mkdirSync(scopeA, { recursive: true });
+			mkdirSync(scopeB, { recursive: true });
+			writeFileSync(join(scopeA, "same.txt"), "a");
+			writeFileSync(join(scopeB, "same.txt"), "b");
+
+			const scopedWrite = createWriteTool(scopeA, { scopePaths: [scopeA, scopeB] });
+			await expect(scopedWrite.execute("scope-write-1", { path: "same.txt", content: "c" })).rejects.toThrow(
+				/Ambiguous relative path/,
+			);
+		});
+	});
+
 	describe("grep tool", () => {
 		it("should include filename when searching a single file", async () => {
 			const testFile = join(testDir, "example.txt");
@@ -436,10 +588,12 @@ describe("Coding Agent Tools", () => {
 
 describe("edit tool fuzzy matching", () => {
 	let testDir: string;
+	let editTool: ReturnType<typeof createEditTool>;
 
 	beforeEach(() => {
 		testDir = join(tmpdir(), `coding-agent-fuzzy-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
+		editTool = createEditTool(testDir);
 	});
 
 	afterEach(() => {
@@ -607,10 +761,12 @@ describe("edit tool fuzzy matching", () => {
 
 describe("edit tool CRLF handling", () => {
 	let testDir: string;
+	let editTool: ReturnType<typeof createEditTool>;
 
 	beforeEach(() => {
 		testDir = join(tmpdir(), `coding-agent-crlf-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
+		editTool = createEditTool(testDir);
 	});
 
 	afterEach(() => {

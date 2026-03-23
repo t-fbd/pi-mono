@@ -253,6 +253,25 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--tools flag", () => {
+		test("parses the full scoped tool list", () => {
+			const result = parseArgs(["--tools", "read,bash,edit,write,grep,find,ls"]);
+			expect(result.tools).toEqual(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+		});
+
+		test("ignores unknown tool names", () => {
+			const result = parseArgs(["--tools", "read,unknown,ls"]);
+			expect(result.tools).toEqual(["read", "ls"]);
+		});
+
+		test("parses @file arguments alongside --tools", () => {
+			const result = parseArgs(["--tools", "read,bash,grep,find,ls", "@README.md", "check this"]);
+			expect(result.tools).toEqual(["read", "bash", "grep", "find", "ls"]);
+			expect(result.fileArgs).toEqual(["README.md"]);
+			expect(result.messages).toEqual(["check this"]);
+		});
+	});
+
 	describe("messages and file args", () => {
 		test("parses plain text messages", () => {
 			const result = parseArgs(["hello", "world"]);

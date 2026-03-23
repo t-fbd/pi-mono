@@ -24,7 +24,7 @@ import {
 	createCustomMessage,
 } from "./messages.js";
 
-export const CURRENT_SESSION_VERSION = 3;
+export const CURRENT_SESSION_VERSION = 4;
 
 export interface SessionHeader {
 	type: "session";
@@ -32,12 +32,14 @@ export interface SessionHeader {
 	id: string;
 	timestamp: string;
 	cwd: string;
+	scopePaths?: string[];
 	parentSession?: string;
 }
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	scopePaths?: string[];
 }
 
 export interface SessionEntryBase {
@@ -181,6 +183,7 @@ export interface SessionInfo {
 export type ReadonlySessionManager = Pick<
 	SessionManager,
 	| "getCwd"
+	| "getScopePaths"
 	| "getSessionDir"
 	| "getSessionId"
 	| "getSessionFile"
@@ -252,6 +255,15 @@ function migrateV2ToV3(entries: FileEntry[]): void {
 	}
 }
 
+/** Migrate v3 → v4: persist scopePaths. Mutates in place. */
+function migrateV3ToV4(entries: FileEntry[]): void {
+	for (const entry of entries) {
+		if (entry.type === "session") {
+			entry.version = 4;
+		}
+	}
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
@@ -264,6 +276,7 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 
 	if (version < 2) migrateV1ToV2(entries);
 	if (version < 3) migrateV2ToV3(entries);
+	if (version < 4) migrateV3ToV4(entries);
 
 	return true;
 }
@@ -664,6 +677,7 @@ export class SessionManager {
 	private sessionFile: string | undefined;
 	private sessionDir: string;
 	private cwd: string;
+	private scopePaths: string[];
 	private persist: boolean;
 	private flushed: boolean = false;
 	private fileEntries: FileEntry[] = [];
@@ -673,6 +687,7 @@ export class SessionManager {
 
 	private constructor(cwd: string, sessionDir: string, sessionFile: string | undefined, persist: boolean) {
 		this.cwd = cwd;
+		this.scopePaths = [cwd];
 		this.sessionDir = sessionDir;
 		this.persist = persist;
 		if (persist && sessionDir && !existsSync(sessionDir)) {
@@ -705,6 +720,11 @@ export class SessionManager {
 
 			const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
 			this.sessionId = header?.id ?? randomUUID();
+			this.scopePaths =
+				Array.isArray(header?.scopePaths) && header.scopePaths.length > 0 ? [...header.scopePaths] : [this.cwd];
+			if (header) {
+				header.scopePaths = [...this.scopePaths];
+			}
 
 			if (migrateToCurrentVersion(this.fileEntries)) {
 				this._rewriteFile();
@@ -728,6 +748,7 @@ export class SessionManager {
 			id: this.sessionId,
 			timestamp,
 			cwd: this.cwd,
+			scopePaths: options?.scopePaths ?? this.scopePaths,
 			parentSession: options?.parentSession,
 		};
 		this.fileEntries = [header];
@@ -775,6 +796,35 @@ export class SessionManager {
 		return this.cwd;
 	}
 
+	getScopePaths(): string[] {
+		return [...this.scopePaths];
+	}
+
+	setScopePaths(scopePaths: string[]): void {
+		const normalized = [this.cwd, ...scopePaths.map((scopePath) => resolve(this.cwd, scopePath))].filter(
+			(path, index, all) => path && all.indexOf(path) === index,
+		);
+		this.scopePaths = normalized;
+		const header = this.fileEntries.find((entry): entry is SessionHeader => entry.type === "session");
+		if (header) {
+			header.scopePaths = [...this.scopePaths];
+			this._rewriteFile();
+		}
+	}
+
+	addScopePath(scopePath: string): void {
+		this.setScopePaths([...this.scopePaths, scopePath]);
+	}
+
+	removeScopePath(scopePath: string): void {
+		const resolved = resolve(this.cwd, scopePath);
+		this.setScopePaths(this.scopePaths.filter((path) => path !== resolved && path !== this.cwd));
+	}
+
+	resetScopePaths(): void {
+		this.setScopePaths([this.cwd]);
+	}
+
 	getSessionDir(): string {
 		return this.sessionDir;
 	}
@@ -798,9 +848,11 @@ export class SessionManager {
 		}
 
 		if (!this.flushed) {
-			for (const e of this.fileEntries) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(e)}\n`);
-			}
+			// Rewrite the full file on the first persisted assistant turn.
+			// This avoids duplicating early entries when the session header was
+			// already rewritten before the first assistant message (for example
+			// when scopePaths changes are persisted eagerly).
+			this._rewriteFile();
 			this.flushed = true;
 		} else {
 			appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
@@ -1174,6 +1226,7 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: this.cwd,
+			scopePaths: this.scopePaths,
 			parentSession: this.persist ? previousSessionFile : undefined,
 		};
 
@@ -1327,6 +1380,7 @@ export class SessionManager {
 			id: newSessionId,
 			timestamp,
 			cwd: targetCwd,
+			scopePaths: [targetCwd],
 			parentSession: sourcePath,
 		};
 		appendFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`);

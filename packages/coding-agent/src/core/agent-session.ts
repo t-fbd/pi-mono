@@ -850,6 +850,7 @@ export class AgentSession {
 
 		return buildSystemPrompt({
 			cwd: this._cwd,
+			scopePaths: this.sessionManager.getScopePaths(),
 			skills: loadedSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
@@ -858,6 +859,11 @@ export class AgentSession {
 			toolSnippets,
 			promptGuidelines,
 		});
+	}
+
+	refreshSystemPrompt(): void {
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.setSystemPrompt(this._baseSystemPrompt);
 	}
 
 	// =========================================================================
@@ -2285,6 +2291,7 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix },
+					scopePaths: () => this.sessionManager.getScopePaths(),
 				});
 
 		this._baseToolDefinitions = new Map(

@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { expandPath, resolveReadPath, resolveToCwd } from "../src/core/tools/path-utils.js";
+import { expandPath, resolveReadPath, resolveSearchPaths, resolveToCwd } from "../src/core/tools/path-utils.js";
 
 describe("path-utils", () => {
 	describe("expandPath", () => {
@@ -34,6 +34,59 @@ describe("path-utils", () => {
 			const result = resolveToCwd("relative/file.txt", "/some/cwd");
 			expect(result).toBe(resolve("/some/cwd", "relative/file.txt"));
 		});
+
+		it("should resolve relative paths against a matching additional scope", () => {
+			const root = mkdtempSync(join(tmpdir(), "path-utils-scope-"));
+			const primary = join(root, "primary");
+			const secondary = join(root, "secondary");
+			mkdirSync(primary);
+			mkdirSync(secondary);
+			mkdirSync(join(secondary, "nested"), { recursive: true });
+			writeFileSync(join(secondary, "nested", "file.txt"), "content");
+
+			const result = resolveToCwd("nested/file.txt", primary, [secondary]);
+			expect(result).toBe(join(secondary, "nested", "file.txt"));
+
+			rmSync(root, { recursive: true, force: true });
+		});
+
+		it("should throw on ambiguous relative paths across scopes", () => {
+			const root = mkdtempSync(join(tmpdir(), "path-utils-scope-"));
+			const primary = join(root, "primary");
+			const secondary = join(root, "secondary");
+			mkdirSync(primary);
+			mkdirSync(secondary);
+			writeFileSync(join(primary, "same.txt"), "a");
+			writeFileSync(join(secondary, "same.txt"), "b");
+
+			expect(() => resolveToCwd("same.txt", primary, [secondary])).toThrow(/Ambiguous relative path/);
+
+			rmSync(root, { recursive: true, force: true });
+		});
+	});
+
+	describe("resolveSearchPaths", () => {
+		it("should fan out to all scopes for missing search path", () => {
+			const result = resolveSearchPaths(undefined, "/primary", ["/secondary"]);
+			expect(result).toEqual(["/primary", "/secondary"]);
+		});
+
+		it("should fan out to all scopes for '.' search path", () => {
+			const result = resolveSearchPaths(".", "/primary", ["/secondary"]);
+			expect(result).toEqual(["/primary", "/secondary"]);
+		});
+
+		it("should resolve explicit relative search paths against a matching additional scope", () => {
+			const root = mkdtempSync(join(tmpdir(), "path-utils-search-"));
+			const primary = join(root, "primary");
+			const secondary = join(root, "secondary");
+			mkdirSync(primary, { recursive: true });
+			mkdirSync(join(secondary, "src"), { recursive: true });
+
+			expect(resolveSearchPaths("src", primary, [secondary])).toEqual([join(secondary, "src")]);
+
+			rmSync(root, { recursive: true, force: true });
+		});
 	});
 
 	describe("resolveReadPath", () => {
@@ -62,6 +115,13 @@ describe("path-utils", () => {
 
 			const result = resolveReadPath(fileName, tempDir);
 			expect(result).toBe(join(tempDir, fileName));
+		});
+
+		it("should fall back to the primary scope when a relative read path does not exist yet", () => {
+			const secondary = join(tempDir, "secondary");
+			mkdirSync(secondary);
+			const result = resolveReadPath("future-file.txt", tempDir, [secondary]);
+			expect(result).toBe(join(tempDir, "future-file.txt"));
 		});
 
 		it("should handle NFC vs NFD Unicode normalization (macOS filenames with accents)", () => {
